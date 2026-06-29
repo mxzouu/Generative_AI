@@ -1,0 +1,20 @@
+venv/
+genai_env/
+*.ini
+
+# Secrets — never commit the API key
+.env
+*.key
+
+# System
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Local vector store (ChromaDB)
+chroma_db/
+*.sqlite3
+chroma_index/

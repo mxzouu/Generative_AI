@@ -1,0 +1,5 @@
+# Light PIM backend — install with:  pip install -r app/requirements.txt
+fastapi>=0.110
+uvicorn[standard]>=0.27
+chromadb>=0.5
+sentence-transformers>=2.5
