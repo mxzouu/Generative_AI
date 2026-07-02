@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fnac Catalog Chatbot</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 16px; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    #question { width: 100%; padding: 10px; font-size: 1rem; box-sizing: border-box; }
+    #ask { margin-top: 10px; padding: 8px 18px; font-size: 1rem; cursor: pointer; }
+    #answer { margin-top: 24px; white-space: pre-wrap; line-height: 1.5; }
+    #sources { margin-top: 12px; font-size: 0.85rem; color: #555; }
+    .error { color: #b3261e; }
+  </style>
+</head>
+<body>
+  <h1>Ask about the catalog</h1>
+  <input id="question" type="text" placeholder="e.g. do you have wireless earbuds under 100 euros?" />
+  <button id="ask">Ask</button>
+  <div id="answer"></div>
+  <div id="sources"></div>
+
+  <script>
+    const questionEl = document.getElementById("question");
+    const answerEl = document.getElementById("answer");
+    const sourcesEl = document.getElementById("sources");
+    const askEl = document.getElementById("ask");
+
+    async function ask() {
+      const question = questionEl.value.trim();
+      if (!question) return;
+      answerEl.textContent = "Thinking...";
+      sourcesEl.textContent = "";
+      try {
+        const res = await fetch("/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          answerEl.innerHTML = `<span class="error">${data.error || "Something went wrong."}</span>`;
+          return;
+        }
+        answerEl.textContent = data.answer;
+        sourcesEl.textContent = "Retrieved: " + data.sources.map(s => `${s.name} (${s.category})`).join(", ");
+      } catch (err) {
+        answerEl.innerHTML = `<span class="error">Request failed: ${err}</span>`;
+      }
+    }
+
+    askEl.addEventListener("click", ask);
+    questionEl.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+  </script>
+</body>
+</html>

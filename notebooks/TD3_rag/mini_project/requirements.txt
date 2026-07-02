@@ -1,0 +1,6 @@
+flask
+anthropic
+python-dotenv
+chromadb
+sentence-transformers
+pandas
