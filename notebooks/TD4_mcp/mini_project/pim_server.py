@@ -58,6 +58,7 @@ if collection.count() == 0:
                 "short_description": r["short_description"],
                 "long_description": r["long_description"],
                 "attributes": r["attributes"],  # JSON string -> Chroma metadata must be scalar
+                "extra": "{}",  # existing catalog has no supplier leftovers
             }
             for _, r in df.iterrows()
         ],
@@ -72,11 +73,12 @@ mcp_server = FastMCP("pim")
 def _hit_from_meta(sku: str, meta: dict) -> dict:
     """Turn a raw Chroma id + metadata dict into the product dict we hand back."""
     hit = {"sku": sku, **meta}
-    if isinstance(hit.get("attributes"), str):
-        try:
-            hit["attributes"] = json.loads(hit["attributes"])
-        except json.JSONDecodeError:
-            pass
+    for field in ("attributes", "extra"):
+        if isinstance(hit.get(field), str):
+            try:
+                hit[field] = json.loads(hit[field])
+            except json.JSONDecodeError:
+                pass
     return hit
 
 
@@ -140,8 +142,13 @@ def create_product(
     short_description: str,
     long_description: str,
     attributes: dict,
+    extra: dict | None = None,
 ) -> dict:
-    """Create a new product: embed it and add it to the persistent catalog index (immediately searchable)."""
+    """Create a new product: embed it and add it to the persistent catalog index (immediately searchable).
+
+    `attributes` is the full category-attribute dict (null where unknown); `extra` is a catch-all for
+    supplier info that maps to no common field and no category attribute (wholesale price, MOQ, warranty...).
+    """
     doc = f"{name} — {long_description}"
     embedding = embed_model.encode(doc).tolist()
     collection.add(
@@ -157,6 +164,7 @@ def create_product(
                 "short_description": short_description,
                 "long_description": long_description,
                 "attributes": json.dumps(attributes),
+                "extra": json.dumps(extra or {}),
             }
         ],
     )
