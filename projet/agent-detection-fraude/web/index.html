@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copilote Fraude</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/vue.global.prod.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <h1>Copilote Fraude</h1>
+        <p class="sub">Triage des sinistres suspects &mdash; l'agent suggère, le conseiller décide.</p>
+      </div>
+      <a class="pim-link" href="http://localhost:8000" target="_blank" rel="noopener">Dashboard sinistres &#8599;</a>
+    </header>
+
+    <main class="chat" ref="chat">
+      <div v-if="!messages.length" class="empty">
+        <p>Essayez :</p>
+        <button v-for="ex in examples" :key="ex.label" class="chip" @click="send(ex.text)">
+          {{ ex.label }}
+        </button>
+      </div>
+
+      <div v-for="(m, i) in messages" :key="i" :class="['msg', m.role]">
+        <div class="bubble">
+          <div class="who">{{ m.role === 'user' ? 'Conseiller' : 'Copilote' }}</div>
+
+          <details v-if="m.trace && m.trace.length" class="trace" open>
+            <summary>{{ m.trace.length }} tool call{{ m.trace.length > 1 ? 's' : '' }}</summary>
+            <div v-for="(t, j) in m.trace" :key="j" class="call">
+              <div class="call-head">&#8594; {{ t.tool }}</div>
+              <pre class="call-in">{{ pretty(t.input) }}</pre>
+              <details class="call-out">
+                <summary>résultat</summary>
+                <pre>{{ t.output }}</pre>
+              </details>
+            </div>
+          </details>
+
+          <div class="text" v-if="m.content">{{ m.content }}</div>
+        </div>
+      </div>
+
+      <div v-if="loading" class="msg assistant">
+        <div class="bubble"><div class="who">Copilote</div><div class="typing">analyse en cours&#8230;</div></div>
+      </div>
+    </main>
+
+    <footer class="composer">
+      <textarea
+        v-model="draft"
+        :disabled="loading"
+        placeholder="Demandez un briefing, un approfondissement, ou validez un cas&#8230;"
+        @keydown.enter.exact.prevent="send()"></textarea>
+      <button :disabled="loading || !draft.trim()" @click="send()">Envoyer</button>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

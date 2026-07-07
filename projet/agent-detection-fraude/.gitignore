@@ -1,0 +1,6 @@
+.env
+chroma_index/
+models/
+data/claims.csv
+data/decisions.json
+__pycache__/

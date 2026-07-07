@@ -1,0 +1,12 @@
+# Copilote fraude — install :  pip install -r app/requirements.txt
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-dotenv>=1.0
+anthropic>=0.40
+mcp>=1.0
+# Le serveur MCP spawné + le pipeline ML (déjà dans le venv du repo pour la plupart) :
+chromadb>=0.5
+sentence-transformers>=2.5
+pandas>=2.0
+scikit-learn>=1.4
+joblib>=1.3
