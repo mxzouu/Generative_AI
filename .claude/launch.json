@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "credit-web",
+      "runtimeExecutable": "C:\\Users\\tomil\\Documents\\Generative_AI\\genai_env\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.web_server:app", "--app-dir", "projet/agent-credit-copilot", "--port", "8601"],
+      "port": 8601
+    },
+    {
+      "name": "credit-copilot",
+      "runtimeExecutable": "C:\\Users\\tomil\\Documents\\Generative_AI\\genai_env\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "streamlit", "run", "projet/agent-credit-copilot/streamlit_app.py", "--server.port", "8555", "--server.headless", "true"],
+      "port": 8555
+    }
+  ]
+}

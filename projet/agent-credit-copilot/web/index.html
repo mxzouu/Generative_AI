@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Credit Copilot</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="hero">
+      <div class="brand"><span class="logo">💳</span><h1>Credit Copilot</h1></div>
+      <p class="tagline">Assistant d'aide à la décision de crédit</p>
+    </header>
+
+    <!-- ============ VUE LISTE ============ -->
+    <section id="list-view">
+      <div class="segmented" id="segmented">
+        <button data-tab="a_traiter" class="active">À traiter</button>
+        <button data-tab="en_cours">En cours</button>
+        <button data-tab="traites">Traités</button>
+        <span class="pill"></span>
+      </div>
+      <div id="grid" class="grid"></div>
+      <p id="empty" class="empty" hidden></p>
+    </section>
+
+    <!-- ============ VUE DÉTAIL ============ -->
+    <section id="detail-view" hidden>
+      <button id="back" class="back">‹ Retour à la pile</button>
+      <div id="detail"></div>
+    </section>
+  </div>
+
+  <!-- ============ CHATBOT FLOTTANT ============ -->
+  <button id="chat-fab" class="chat-fab" hidden aria-label="Ouvrir l'assistant">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">
+      <path d="M12 3C6.5 3 2 6.7 2 11.3c0 2.5 1.3 4.7 3.4 6.2-.1 1-.5 2.3-1.2 3.3-.2.3 0 .8.4.7 1.9-.4 3.4-1.1 4.4-1.7 1 .2 2 .4 3 .4 5.5 0 10-3.7 10-8.9S17.5 3 12 3z"/>
+    </svg>
+  </button>
+
+  <div id="chat-panel" class="chat-panel" hidden>
+    <div class="chat-head">
+      <button id="chat-back" class="chat-icon" aria-label="Conversations" title="Historique des conversations">‹</button>
+      <div class="chat-head-title">
+        <strong id="chat-title">Assistant réglementaire</strong>
+        <span id="chat-context" class="chat-context"></span>
+      </div>
+      <button id="chat-new" class="chat-icon" aria-label="Nouvelle conversation" title="Nouvelle conversation">✎</button>
+      <button id="chat-close" class="chat-close" aria-label="Fermer">✕</button>
+    </div>
+    <div id="chat-log" class="chat-log"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" type="text" placeholder="Poser une question…" autocomplete="off" />
+      <button type="submit" aria-label="Envoyer">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3.4 20.6l17.4-8.6L3.4 3.4 3.4 10l12 2-12 2z"/></svg>
+      </button>
+    </form>
+  </div>
+
+  <!-- ============ COMPOSER EMAIL ============ -->
+  <div id="email-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong id="email-title">Rédaction de l'email</strong>
+        <button id="email-close" class="chat-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>Destinataire</label>
+        <input id="email-to" type="text" />
+        <label>Objet</label>
+        <input id="email-subject" type="text" />
+        <label>Message <span class="muted">(modifiable)</span></label>
+        <textarea id="email-body" rows="12"></textarea>
+        <p id="email-status" class="email-status"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="email-cancel" class="btn btn-analyse">Annuler</button>
+        <button id="email-send" class="btn btn-accord">✓ Confirmer et envoyer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ CONTRE-OFFRE ============ -->
+  <div id="offer-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>📝 Contre-offre proposée par l'assistant</strong>
+        <button id="offer-close" class="chat-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="modal-body" id="offer-body"></div>
+      <div class="modal-actions">
+        <button id="offer-drop" class="btn btn-refus">Abandonner</button>
+        <button id="offer-validate" class="btn btn-accord">✓ Valider et rédiger le mail</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LIGHTBOX PDF ============ -->
+  <div id="lightbox" class="lightbox" hidden><img id="lightbox-img" alt="Page du document" /></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Secrets
+.env
+
+# Données/artefacts régénérables (via scripts/ + ml/train.py)
+data/credit_copilot.db
+data/credit_scoring_dataset.csv
+data/demo_scenarios.json
+models/
+chroma_index/
+
+# Python
+__pycache__/
+*.pyc

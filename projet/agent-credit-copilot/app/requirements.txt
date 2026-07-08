@@ -1,0 +1,17 @@
+# Credit Copilot — dépendances (à installer dans le venv du repo genai_env)
+# Déjà présents dans le repo : mcp, anthropic, chromadb, sentence-transformers, pandas, numpy, scikit-learn
+# Ajouts spécifiques au projet :
+faker
+reportlab
+pypdf
+xgboost
+shap
+pymupdf
+python-dotenv
+
+# Site web (UI principale)
+fastapi
+uvicorn
+
+# UI alternative (ancienne, optionnelle)
+streamlit
