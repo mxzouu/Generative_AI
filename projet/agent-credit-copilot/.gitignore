@@ -5,6 +5,7 @@
 data/credit_copilot.db
 data/credit_scoring_dataset.csv
 data/demo_scenarios.json
+data/outbox.log
 models/
 chroma_index/
 

@@ -20,7 +20,7 @@ web/ (HTML/JS/CSS)  ──HTTP──►  app/web_server.py (FastAPI, port 8600)
                                     ├─ /api/chat ─────────►  app/agent.py (boucle Haiku)
                                     │                              │  session MCP stdio (spawn)
                                     │                              ▼
-                                    │                     app/credit_server.py (serveur MCP, 13 tools)
+                                    │                     app/credit_server.py (serveur MCP, 14 tools)
                                     │                              ├─ SQLite   data/credit_copilot.db
                                     │                              ├─ ML       models/credit_model.joblib (XGBoost + SHAP)
                                     │                              └─ RAG      chroma_index/ (PDF découpés page par page)
@@ -49,7 +49,11 @@ source .venv/bin/activate        # Windows : .venv\Scripts\activate
 pip install -r app/requirements.txt
 ```
 
-Crée un fichier `.env` à la racine du projet (`agent-credit-copilot/.env`) :
+Copie le modèle `.env.example` en `.env` à la racine du projet, puis remplis ta clé :
+
+```bash
+cp .env.example .env        # Windows : copy .env.example .env
+```
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
@@ -59,8 +63,7 @@ SMTP_USER=ton_adresse@gmail.com
 SMTP_APP_PASSWORD=xxxxxxxxxxxxxxxx
 ```
 
-> Il n'y a pas de `.env.example` dans le zip — le fichier `.env` ci-dessus est tout ce qu'il te
-> faut créer à la main.
+> Le `.env` est gitignoré : ta clé n'est jamais committée.
 
 ---
 
@@ -122,7 +125,7 @@ agent-credit-copilot/
 └── models/, chroma_index/   # artefacts générés (gitignorés)
 ```
 
-**Les 13 tools MCP exposés par `credit_server.py`** (détail complet dans
+**Les 14 tools MCP exposés par `credit_server.py`** (détail complet dans
 `skills/credit_review/SKILL.md`) :
 
 | Tool | Rôle |
@@ -133,15 +136,26 @@ agent-credit-copilot/
 | `search_internal_docs` | RAG sur la doc interne, réponse sourcée (PDF + page) |
 | `query_client_history` | historique crédits / incidents |
 | `simulate_offer` | re-scoring "what-if" (autre montant/durée/apport) |
-| `propose_counter_offer` | génère une contre-offre |
-| `record_decision` | **seul tool en écriture** — n'écrit que sur ordre explicite du conseiller |
+| `propose_counter_offer` | fige une contre-offre (après itération sur `simulate_offer`) |
+| `request_decision` | ouvre le courrier de décision dans l'UI (équivaut au clic bouton) |
+| `flag_decision_review` | **garde-fou** : verdict de la revue autonome d'une décision (warnings) |
+| `record_decision` | écrit la décision en base (n'écrit que sur ordre explicite du conseiller) |
 | `add_client`, `add_dossier` | créer un client / un dossier |
 | `reopen_dossier` | remettre un dossier "en cours" |
 | `list_dossiers` | lister la pile par statut |
 
-**Garde-fou clé** : sous le seuil critique de risque, `run_credit_score` lève un flag
-`no_auto_processing` → escalade obligatoire, jamais de décision automatique. `record_decision`
-reste le seul point d'écriture de la base.
+**Deux garde-fous clés :**
+- Sous le seuil critique de risque, `run_credit_score` lève `no_auto_processing` → escalade
+  obligatoire, jamais de décision automatique.
+- **Revue de décision agentique** : avant de finaliser une décision, l'agent **étudie le dossier en
+  autonomie** (score + SHAP + historique + grille via RAG) et lève des **warnings sourcés** si la
+  décision est incohérente (`flag_decision_review`) — le conseiller peut passer outre, mais informé.
+
+## Debug mode (exigé)
+
+L'UI expose le travail de l'agent **en temps réel** : raisonnement (chain of thought) + chaque tool
+appelé avec ses arguments et son résultat, dans le chatbot comme dans la revue de décision. Un
+interrupteur **🧠 Raisonnement** (en haut à droite) permet de l'afficher ou de le masquer.
 
 ---
 

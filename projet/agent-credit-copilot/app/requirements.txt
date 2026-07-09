@@ -1,17 +1,32 @@
-# Credit Copilot — dépendances (à installer dans le venv du repo genai_env)
-# Déjà présents dans le repo : mcp, anthropic, chromadb, sentence-transformers, pandas, numpy, scikit-learn
-# Ajouts spécifiques au projet :
+# Credit Copilot — dépendances (self-contained : installables dans un venv frais)
+#   python -m pip install -r projet/agent-credit-copilot/app/requirements.txt
+
+# --- Cœur agentique (TD4/TD5) --------------------------------------------------
+anthropic
+mcp
+
+# --- RAG / embeddings (TD1/TD3) ------------------------------------------------
+chromadb
+sentence-transformers
+
+# --- Modèle ML + explicabilité (TD2) -------------------------------------------
+scikit-learn
+xgboost
+shap
+pandas
+numpy
+joblib
+
+# --- Interface web (UI principale) ---------------------------------------------
+fastapi
+uvicorn
+pymupdf          # rendu des pages PDF (fitz)
+python-dotenv
+
+# --- Génération des données de démo (scripts/) ---------------------------------
 faker
 reportlab
 pypdf
-xgboost
-shap
-pymupdf
-python-dotenv
 
-# Site web (UI principale)
-fastapi
-uvicorn
-
-# UI alternative (ancienne, optionnelle)
+# --- UI alternative, optionnelle (ancienne version) ----------------------------
 streamlit
