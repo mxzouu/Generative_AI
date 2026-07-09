@@ -9,6 +9,11 @@
 </head>
 <body>
   <div class="app">
+    <div class="cot-toggle" id="cot-toggle" role="switch" aria-checked="true" tabindex="0"
+         title="Afficher ou masquer le raisonnement de l'agent">
+      <span class="ct-label">🧠 Raisonnement</span>
+      <span class="ct-switch"><span class="ct-knob"></span></span>
+    </div>
     <header class="hero">
       <div class="brand"><img class="logo" src="logo.svg" alt="" width="46" height="46" /><h1>Tomil<span class="amp">&amp;</span>Mazou Capital</h1></div>
       <p class="tagline">Assistant d'aide à la décision de crédit</p>
@@ -67,6 +72,7 @@
         <button id="email-close" class="chat-close" aria-label="Fermer">✕</button>
       </div>
       <div class="modal-body">
+        <div id="email-activity" class="agent-activity" hidden></div>
         <label>Destinataire</label>
         <input id="email-to" type="text" />
         <label>Objet</label>

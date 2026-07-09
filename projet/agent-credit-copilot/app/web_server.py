@@ -162,6 +162,27 @@ def tools_from_trace(trace: list[dict]) -> list[dict]:
     return out
 
 
+def _tool_meta(name: str) -> dict:
+    return TOOL_META.get(name, {"icon": "🔧", "label": name})
+
+
+def steps_from_trace(trace: list[dict]) -> list[dict]:
+    """Déroulé ordonné de l'agent : raisonnements (`thought`) + appels d'outils avec ENTRÉE et SORTIE.
+
+    Sert à re-afficher le processus complet sous une réponse (le live le construit au fil de l'eau,
+    ceci le persiste pour que la chain of thought + les détails des tools restent visibles ensuite).
+    """
+    steps = []
+    for t in trace:
+        if t["tool"] == "_thought":
+            steps.append({"kind": "thought", "text": t.get("text", "")})
+        else:
+            meta = _tool_meta(t["tool"])
+            steps.append({"kind": "tool", "tool": t["tool"], "icon": meta["icon"],
+                          "label": meta["label"], "input": t.get("input"), "output": t.get("output", "")})
+    return steps
+
+
 def action_from_trace(trace: list[dict]) -> dict | None:
     """Détecte une action déclenchée par l'agent qui doit piloter l'UI (ouvrir/rafraîchir/contre-offre)."""
     action = None
@@ -342,17 +363,20 @@ async def chat(req: ChatRequest):
         reply = ""
         async with state["lock"]:
             async for ev in agent.stream(req.messages, context=context):
-                if ev["type"] == "tool_start":
-                    meta = TOOL_META.get(ev["tool"], {"icon": "🔧", "label": ev["tool"]})
-                    yield _sse({"type": "tool_start", "tool": ev["tool"],
-                                "icon": meta["icon"], "label": meta["label"]})
+                if ev["type"] == "thought":
+                    yield _sse({"type": "thought", "text": ev["text"]})
+                elif ev["type"] == "tool_start":
+                    meta = _tool_meta(ev["tool"])
+                    yield _sse({"type": "tool_start", "tool": ev["tool"], "icon": meta["icon"],
+                                "label": meta["label"], "input": ev.get("input")})
                 elif ev["type"] == "tool_end":
-                    yield _sse({"type": "tool_end", "tool": ev["tool"]})
+                    yield _sse({"type": "tool_end", "tool": ev["tool"], "output": ev.get("output", "")})
                 elif ev["type"] == "final":
                     reply, trace = ev["reply"], ev["trace"]
         _score_cache.clear()  # l'agent a pu créer/rouvrir un dossier -> on invalide le cache de scores
         yield _sse({"type": "done", "reply": reply, "sources": sources_from_trace(trace),
-                    "tools": tools_from_trace(trace), "action": action_from_trace(trace)})
+                    "tools": tools_from_trace(trace), "steps": steps_from_trace(trace),
+                    "action": action_from_trace(trace)})
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

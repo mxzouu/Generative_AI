@@ -10,6 +10,7 @@ data/outbox.log). Adresses de test fixées ci-dessous.
 from __future__ import annotations
 
 import os
+import re
 import smtplib
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
@@ -74,20 +75,51 @@ def subject_for(kind: str, demande_id: str) -> str:
     return SUBJECTS.get(kind, "Votre demande de crédit")
 
 
+def _parse_draft(raw: str) -> tuple[str, str]:
+    """Sépare la réponse du modèle en (reasoning, body).
+
+    Format attendu : 1re ligne « RAISONNEMENT: … », puis une ligne « --- », puis le corps.
+    Robuste aux corps multi-lignes (contrairement au JSON) et tolérant si le format n'est pas suivi.
+    """
+    lines = raw.strip().split("\n")
+    reasoning = ""
+    if lines and re.match(r"\s*RAISONNEMENT\s*:", lines[0], re.IGNORECASE):
+        reasoning = lines[0].split(":", 1)[1].strip()
+        lines = lines[1:]
+    if any(ln.strip() == "---" for ln in lines):  # coupe au 1er séparateur
+        after, seen = [], False
+        for ln in lines:
+            if not seen and ln.strip() == "---":
+                seen = True
+                continue
+            if seen:
+                after.append(ln)
+        lines = after
+    return reasoning, "\n".join(lines).strip()
+
+
 def draft_email(kind: str, ctx: str, demande_id: str) -> dict:
-    """Rédige le brouillon d'email (Haiku) pour la décision `kind`. Renvoie {to, subject, body}."""
+    """Rédige le brouillon d'email (Haiku) pour la décision `kind`.
+
+    Renvoie {to, subject, body, reasoning} — `reasoning` est une phrase courte exposant l'approche de
+    rédaction de l'agent (chain of thought minimaliste affichée dans l'interface).
+    """
     consigne = CONSIGNES.get(kind, CONSIGNES["accord"])
     system = ("Tu es l'assistant d'un conseiller crédit dans une banque française. "
               "Tu rédiges des emails clairs et professionnels (formule d'appel, corps, formule de "
-              "politesse, signature « Le service crédit »). Réponds UNIQUEMENT par le corps de l'email, "
-              "sans objet ni commentaire. Écris en TEXTE BRUT : aucun formatage markdown (pas "
-              "d'astérisques, pas de #, pas de puces « - »), uniquement des paragraphes simples.")
+              "politesse, signature « Le service crédit »), en TEXTE BRUT (aucun formatage markdown : "
+              "pas d'astérisques, pas de #, pas de puces). "
+              "Structure ta réponse EXACTEMENT ainsi : la première ligne commence par « RAISONNEMENT: » "
+              "suivie d'une phrase courte (max 25 mots) décrivant ton approche de rédaction ; puis une "
+              "ligne contenant uniquement « --- » ; puis le corps de l'email.")
     user = f"{consigne}\n\nContexte du dossier :\n{ctx}"
     client = anthropic.Anthropic()
-    resp = client.messages.create(model=MODEL, max_tokens=800, system=system,
+    resp = client.messages.create(model=MODEL, max_tokens=900, system=system,
                                   messages=[{"role": "user", "content": user}])
-    body = "".join(b.text for b in resp.content if b.type == "text").strip()
-    return {"to": recipient(kind), "subject": subject_for(kind, demande_id), "body": body}
+    raw = "".join(b.text for b in resp.content if b.type == "text").strip()
+    reasoning, body = _parse_draft(raw)
+    return {"to": recipient(kind), "subject": subject_for(kind, demande_id),
+            "body": body, "reasoning": reasoning}
 
 
 def _log(to: str, subject: str, body: str, sent: bool) -> None:

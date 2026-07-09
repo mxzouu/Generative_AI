@@ -64,6 +64,23 @@ body {
 @media (max-width: 520px) { .hero h1 { font-size: 30px; } }
 .tagline { color: var(--text-2); font-size: 18px; margin: 10px 0 0; }
 
+/* ---------- Interrupteur : exposition du raisonnement de l'agent ---------- */
+.cot-toggle { position: fixed; top: 14px; right: 16px; z-index: 40; display: inline-flex; align-items: center;
+  gap: 9px; padding: 6px 11px; border-radius: 980px; cursor: pointer; user-select: none;
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  backdrop-filter: saturate(180%) blur(14px); -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border: 1px solid var(--hair); box-shadow: var(--shadow); transition: opacity .2s; }
+.cot-toggle:hover { opacity: .92; }
+.cot-toggle .ct-label { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.cot-toggle.on .ct-label { color: var(--text); }
+.cot-toggle .ct-switch { width: 38px; height: 22px; border-radius: 980px; background: rgba(120,120,128,.28);
+  position: relative; transition: background .2s; flex: 0 0 auto; }
+.cot-toggle .ct-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .2s; }
+.cot-toggle.on .ct-switch { background: var(--blue); }
+.cot-toggle.on .ct-knob { transform: translateX(16px); }
+@media (max-width: 560px) { .cot-toggle .ct-label { display: none; } .cot-toggle { padding: 7px; } }
+
 /* ---------- Segmented control ---------- */
 .segmented {
   position: relative; display: inline-flex; margin: 0 auto 26px; left: 50%;
@@ -232,22 +249,50 @@ textarea.motiv:focus { outline: 2px solid var(--blue); border-color: transparent
 .bubble.user { align-self: flex-end; background: var(--blue); color: #fff; border-bottom-right-radius: 6px; }
 .bubble.bot { align-self: flex-start; background: rgba(120,120,128,.16); color: var(--text); border-bottom-left-radius: 6px; }
 .bubble.bot strong { font-weight: 700; }
-/* chaîne d'outils utilisés par l'agent (en temps réel pendant, puis au-dessus de la réponse) */
-.tools-used, .tools-live { align-self: flex-start; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 92%; }
-.tools-used .tu-label, .tools-live .tu-label { font-size: 11px; font-weight: 600; color: var(--text-2);
-  letter-spacing: .02em; margin-right: 2px; }
-.tu-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--blue);
-  background: rgba(0,113,227,.10); border: 1px solid rgba(0,113,227,.18);
-  padding: 3px 9px; border-radius: 980px; white-space: nowrap;
-  animation: tuPop .22s cubic-bezier(.2,.8,.2,1); }
-@media (prefers-color-scheme: dark) { .tu-chip { color: #7ab8ff; background: rgba(10,132,255,.16); border-color: rgba(10,132,255,.3); } }
-@keyframes tuPop { from { opacity: 0; transform: scale(.9); } }
-/* pastille du tool en cours d'exécution : pulse + halo (montre que l'agent travaille) */
-.tu-chip.running { animation: tuPulse 1.1s ease-in-out infinite; box-shadow: 0 0 0 3px rgba(0,113,227,.12); }
-.tu-chip.running::before { content: ""; width: 6px; height: 6px; border-radius: 50%;
+/* ---------- Déroulé de l'agent : chain of thought + tools détaillés (live puis persistant) ---------- */
+.agent-proc { align-self: flex-start; max-width: 92%; display: flex; flex-direction: column; gap: 6px;
+  background: rgba(120,120,128,.06); border: 1px solid var(--hair); border-radius: 14px; padding: 10px 12px; }
+.proc-label { font-size: 11px; font-weight: 600; color: var(--text-2); letter-spacing: .02em; }
+
+/* raisonnement (chain of thought) */
+.cot { display: flex; gap: 7px; font-size: 12.5px; line-height: 1.42; color: var(--text-2);
+  font-style: italic; animation: tuPop .2s ease; }
+.cot-ic { font-style: normal; flex: 0 0 auto; }
+.cot-tx { white-space: pre-wrap; word-wrap: break-word; }
+
+/* appel d'outil repliable (détails entrée/sortie) */
+.tool-step { animation: tuPop .2s ease; }
+.tool-step > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.tool-step > summary::-webkit-details-marker { display: none; }
+.tool-step > summary::after { content: "›"; color: var(--text-2); font-size: 14px; transition: transform .2s; }
+.tool-step[open] > summary::after { transform: rotate(90deg); }
+.ts-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--blue);
+  background: rgba(0,113,227,.10); border: 1px solid rgba(0,113,227,.18); padding: 3px 9px; border-radius: 980px; }
+.ts-args { font-size: 11px; color: var(--text-2); word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ts-body { margin-top: 6px; }
+.ts-k { font-size: 10px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; margin: 6px 0 3px; }
+.ts-body pre { margin: 0; background: var(--card-2); border: 1px solid var(--hair); border-radius: 8px;
+  padding: 8px 10px; font-size: 11px; line-height: 1.4; max-height: 220px; overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+@media (prefers-color-scheme: dark) { .ts-chip { color: #7ab8ff; background: rgba(10,132,255,.16); border-color: rgba(10,132,255,.3); } }
+
+/* outil en cours d'exécution : la puce pulse + point clignotant (montre que l'agent travaille) */
+.tool-step.running .ts-chip { animation: tuPulse 1.1s ease-in-out infinite; box-shadow: 0 0 0 3px rgba(0,113,227,.12); }
+.tool-step.running .ts-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%;
   background: var(--blue); animation: tuBlink 1.1s ease-in-out infinite; }
+@keyframes tuPop { from { opacity: 0; transform: translateY(3px); } }
 @keyframes tuPulse { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
 @keyframes tuBlink { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
+
+/* activité de l'agent dans le composeur d'email (chain of thought minimaliste hors chatbot) */
+.agent-activity { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.4;
+  color: var(--text-2); background: rgba(0,113,227,.06); border: 1px solid var(--hair);
+  border-radius: 12px; padding: 9px 12px; margin-bottom: 6px; }
+.agent-activity .cot-ic { flex: 0 0 auto; }
+.agent-activity .cot-tx { font-style: italic; white-space: pre-wrap; word-wrap: break-word; }
+.agent-activity .aa-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue);
+  flex: 0 0 auto; margin-top: 3px; animation: tuBlink 1.1s ease-in-out infinite; }
 
 .sources { align-self: flex-start; display: flex; gap: 8px; flex-wrap: wrap; max-width: 90%; }
 .thumb { border: 1px solid var(--hair); border-radius: 10px; overflow: hidden; cursor: pointer;

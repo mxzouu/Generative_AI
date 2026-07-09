@@ -5,6 +5,7 @@ const api = (p, opt) => fetch(p, opt).then((r) => { if (!r.ok) throw new Error(r
 const state = {
   tab: "a_traiter", data: null, currentId: null, currentDecision: null,
   convos: {}, chatView: "convo", convSeq: 0, busy: false, email: null,
+  showCoT: localStorage.getItem("showCoT") !== "0",  // exposition du raisonnement de l'agent (défaut : on)
 };
 
 const RISK_LABEL = { low: "Risque faible", medium: "Risque modéré", high: "Risque élevé" };
@@ -174,6 +175,12 @@ async function openEmail(kind, client_id, demande_id, offer = null) {
   $("#email-body").value = "L'assistant rédige l'email…";
   $("#email-status").textContent = ""; $("#email-status").className = "email-status";
   $("#email-send").disabled = true;
+  // Activité de l'agent (chain of thought minimaliste) — visible seulement si l'exposition est activée.
+  const act = $("#email-activity");
+  if (state.showCoT) {
+    act.hidden = false; act.className = "agent-activity working";
+    act.innerHTML = `<span class="aa-dot"></span><span>L'agent rédige le courrier…</span>`;
+  } else { act.hidden = true; }
   $("#email-modal").hidden = false;
   try {
     const d = await api("/api/draft-email", {
@@ -182,7 +189,12 @@ async function openEmail(kind, client_id, demande_id, offer = null) {
     });
     $("#email-to").value = d.to; $("#email-subject").value = d.subject; $("#email-body").value = d.body;
     $("#email-send").disabled = false;
+    if (state.showCoT && d.reasoning) {
+      act.hidden = false; act.className = "agent-activity";
+      act.innerHTML = `<span class="cot-ic">💭</span><span class="cot-tx">${mdBold(d.reasoning)}</span>`;
+    } else { act.hidden = true; }
   } catch (e) {
+    act.hidden = true;
     $("#email-body").value = ""; $("#email-status").textContent = "Erreur lors de la rédaction."; $("#email-status").className = "email-status err";
   }
 }
@@ -254,16 +266,48 @@ function chipsFor() {
   return c;
 }
 
+// ---- rendu du « déroulé » de l'agent : chain of thought + détails des tools -------------
+function fmtArgs(input) {
+  if (!input || !Object.keys(input).length) return "";
+  return Object.entries(input).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join(", ");
+}
+function prettyJSON(s) { try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s || ""; } }
+
+function cotEl(text) {  // une étape de raisonnement (chain of thought)
+  const el = document.createElement("div");
+  el.className = "cot";
+  el.innerHTML = `<span class="cot-ic">💭</span><span class="cot-tx">${mdBold(text)}</span>`;
+  return el;
+}
+function fillToolBody(body, step) {  // remplit le détail (entrée + résultat) d'un tool
+  const inp = step.input && Object.keys(step.input).length ? prettyJSON(JSON.stringify(step.input)) : "—";
+  let out = prettyJSON(step.output || "");
+  if (out.length > 1600) out = out.slice(0, 1600) + "\n… (tronqué)";
+  body.innerHTML = `<div class="ts-k">Entrée</div><pre>${esc(inp)}</pre><div class="ts-k">Résultat</div><pre>${esc(out)}</pre>`;
+}
+function toolStepEl(step) {  // {icon,label,input,output?} -> <details> repliable
+  const d = document.createElement("details");
+  d.className = "tool-step";
+  const args = fmtArgs(step.input);
+  d.innerHTML = `<summary><span class="ts-chip"><span class="ts-ic">${step.icon}</span>${esc(step.label)}</span>` +
+    (args ? `<code class="ts-args">${esc(args)}</code>` : "") + `</summary>`;
+  const body = document.createElement("div");
+  body.className = "ts-body";
+  d.appendChild(body);
+  if (step.output !== undefined && step.output !== null && step.output !== "") fillToolBody(body, step);
+  return { el: d, body };
+}
+function renderProcess(steps) {  // bloc complet persistant, reconstruit depuis le message
+  const wrap = document.createElement("div");
+  wrap.className = "agent-proc";
+  wrap.innerHTML = `<div class="proc-label">⚙︎ Déroulé de l'agent</div>`;
+  for (const s of steps) wrap.appendChild(s.kind === "thought" ? cotEl(s.text) : toolStepEl(s).el);
+  return wrap;
+}
+
 function bubble(m, log) {
-  // Chaîne d'outils réellement appelés par l'agent : rendue au-dessus de sa réponse
-  // pour donner à voir qu'il travaille agentiquement (skills/tools MCP).
-  if (m.role !== "user" && m.tools && m.tools.length) {
-    const tu = document.createElement("div");
-    tu.className = "tools-used";
-    tu.innerHTML = `<span class="tu-label">⚙︎ Actions de l'agent</span>` +
-      m.tools.map((t) => `<span class="tu-chip">${t.icon} ${esc(t.label)}${t.count > 1 ? ` ×${t.count}` : ""}</span>`).join("");
-    log.appendChild(tu);
-  }
+  // Déroulé de l'agent (raisonnement + tools détaillés) rendu au-dessus de sa réponse — si activé.
+  if (state.showCoT && m.role !== "user" && m.steps && m.steps.length) log.appendChild(renderProcess(m.steps));
   const b = document.createElement("div");
   b.className = "bubble " + (m.role === "user" ? "user" : "bot");
   b.innerHTML = m.role === "user" ? esc(m.content) : mdBold(m.content);
@@ -347,16 +391,22 @@ async function sendMessage(text) {
   state.busy = true;
   const log = $("#chat-log");
 
-  // Bloc d'activité EN TEMPS RÉEL : les outils s'affichent au fil de l'eau (façon terminal d'agent).
-  const live = document.createElement("div");
-  live.className = "tools-used tools-live"; live.hidden = true;
-  live.innerHTML = `<span class="tu-label">⚙︎ Actions de l'agent</span>`;
-  const thinking = document.createElement("div");
-  thinking.className = "typing"; thinking.textContent = "L'assistant réfléchit…";
-  log.appendChild(live); log.appendChild(thinking);
+  // Déroulé EN TEMPS RÉEL : raisonnement (chain of thought) + tools détaillés au fil de l'eau.
+  // Construit uniquement si l'exposition du raisonnement est activée (sinon simple indicateur).
+  const showProc = state.showCoT;
+  let proc = null;
+  if (showProc) {
+    proc = document.createElement("div");
+    proc.className = "agent-proc"; proc.hidden = true;
+    proc.innerHTML = `<div class="proc-label">⚙︎ Déroulé de l'agent</div>`;
+    log.appendChild(proc);
+  }
+  const status = document.createElement("div");
+  status.className = "typing"; status.textContent = "L'assistant réfléchit…";
+  log.appendChild(status);
   log.scrollTop = log.scrollHeight;
-  const finish = () => { thinking.remove(); live.remove(); };
-  let running = null;  // pastille du tool en cours d'exécution
+  const finish = () => { status.remove(); if (proc) proc.remove(); };
+  let curInput = null;  // entrée du tool en cours (pour remplir son détail à la fin)
 
   try {
     const resp = await fetch("/api/chat", {
@@ -375,18 +425,28 @@ async function sendMessage(text) {
         const raw = buf.slice(0, nl); buf = buf.slice(nl + 2);
         if (!raw.startsWith("data:")) continue;
         const ev = JSON.parse(raw.slice(5).trim());
-        if (ev.type === "tool_start") {
-          live.hidden = false;
-          if (running) running.classList.remove("running");
-          running = document.createElement("span");
-          running.className = "tu-chip running";
-          running.innerHTML = `${ev.icon} ${esc(ev.label)}`;
-          live.appendChild(running);
-          thinking.textContent = `${ev.icon} ${ev.label}…`;
-          log.scrollTop = log.scrollHeight;
+        if (ev.type === "thought") {
+          if (proc) { proc.hidden = false; proc.appendChild(cotEl(ev.text)); log.scrollTop = log.scrollHeight; }
+          status.textContent = "L'assistant réfléchit…";
+        } else if (ev.type === "tool_start") {
+          curInput = ev.input;
+          if (proc) {
+            proc.hidden = false;
+            const { el } = toolStepEl({ icon: ev.icon, label: ev.label, input: ev.input });
+            el.classList.add("running");
+            proc.appendChild(el);
+            log.scrollTop = log.scrollHeight;
+          }
+          status.textContent = showProc ? `${ev.icon} ${ev.label}…` : "L'assistant travaille…";
         } else if (ev.type === "tool_end") {
-          if (running) running.classList.remove("running");
-          thinking.textContent = "L'assistant rédige sa réponse…";
+          if (proc) {
+            const run = proc.querySelector(".tool-step.running");
+            if (run) {
+              run.classList.remove("running");
+              fillToolBody(run.querySelector(".ts-body"), { input: curInput, output: ev.output });
+            }
+          }
+          status.textContent = "L'assistant rédige sa réponse…";
         } else if (ev.type === "done") {
           final = ev;
         }
@@ -394,7 +454,7 @@ async function sendMessage(text) {
     }
     finish();
     conv.msgs.push({ role: "assistant", content: (final && final.reply) || "",
-                     sources: (final && final.sources) || [], tools: (final && final.tools) || [] });
+                     sources: (final && final.sources) || [], steps: (final && final.steps) || [] });
     state.busy = false; renderChat();
     if (final && final.action) await handleAction(final.action);
   } catch (e) {
@@ -431,6 +491,19 @@ function openOfferModal(offer) {
 
 function openLightbox(src) { $("#lightbox-img").src = src; $("#lightbox").hidden = false; }
 
+// ============================================================== exposition du raisonnement (on/off)
+function applyCoT() {
+  const t = $("#cot-toggle");
+  t.classList.toggle("on", state.showCoT);
+  t.setAttribute("aria-checked", state.showCoT ? "true" : "false");
+}
+function toggleCoT() {
+  state.showCoT = !state.showCoT;
+  localStorage.setItem("showCoT", state.showCoT ? "1" : "0");
+  applyCoT();
+  if (!$("#chat-panel").hidden) renderChat();  // reflète le changement sur les messages déjà affichés
+}
+
 // ============================================================== init
 function init() {
   $("#segmented").querySelectorAll("button").forEach((b) => {
@@ -456,6 +529,10 @@ function init() {
     openEmail("contre_offre", state.currentClientId, state.currentId, state.offer);
   };
   $("#lightbox").onclick = () => { $("#lightbox").hidden = true; };
+  const cot = $("#cot-toggle");
+  cot.onclick = toggleCoT;
+  cot.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCoT(); } };
+  applyCoT();
   window.addEventListener("resize", () => { if (!$("#list-view").hidden) movePill(); });
   load().catch(() => { $("#empty").hidden = false; $("#empty").textContent = "Erreur de chargement de l'API."; });
 }
