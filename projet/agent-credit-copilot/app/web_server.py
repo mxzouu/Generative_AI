@@ -60,6 +60,7 @@ TOOL_META = {
     "query_client_history": {"icon": "📁", "label": "Historique du client"},
     "record_decision":      {"icon": "✍️", "label": "Décision enregistrée"},
     "request_decision":      {"icon": "📨", "label": "Préparation du courrier de décision"},
+    "flag_decision_review":  {"icon": "🛡️", "label": "Verdict de la revue"},
     "add_client":           {"icon": "➕", "label": "Nouveau client"},
     "add_dossier":          {"icon": "📂", "label": "Nouveau dossier"},
     "reopen_dossier":       {"icon": "🔄", "label": "Réouverture du dossier"},
@@ -183,6 +184,18 @@ def steps_from_trace(trace: list[dict]) -> list[dict]:
     return steps
 
 
+def review_from_trace(trace: list[dict]) -> dict | None:
+    """Extrait le verdict de la revue de décision (dernier appel à flag_decision_review)."""
+    for t in reversed(trace):
+        if t.get("tool") != "flag_decision_review" or "output" not in t:
+            continue
+        for v in _json_values(t["output"]):
+            if isinstance(v, dict) and v.get("revue_decision"):
+                return {k: v.get(k) for k in
+                        ("decision", "coherent", "niveau", "avertissements", "recommandation")}
+    return None
+
+
 def action_from_trace(trace: list[dict]) -> dict | None:
     """Détecte une action déclenchée par l'agent qui doit piloter l'UI (ouvrir/rafraîchir/contre-offre)."""
     action = None
@@ -254,6 +267,11 @@ app = FastAPI(title="Credit Copilot", lifespan=lifespan)
 class ChatRequest(BaseModel):
     messages: list[dict]
     demande_id: str | None = None
+
+
+class ReviewRequest(BaseModel):
+    demande_id: str
+    decision: str
 
 
 class DecisionRequest(BaseModel):
@@ -377,6 +395,75 @@ async def chat(req: ChatRequest):
         yield _sse({"type": "done", "reply": reply, "sources": sources_from_trace(trace),
                     "tools": tools_from_trace(trace), "steps": steps_from_trace(trace),
                     "action": action_from_trace(trace)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+REVIEW_PROMPT = (
+    "REVUE DE DÉCISION (garde-fou). Le conseiller s'apprête à prendre la décision « {decision} » "
+    "sur le dossier {demande_id}. Étudie ce dossier de façon AUTONOME avant qu'il ne valide : "
+    "appelle run_credit_score et explain_score, consulte query_client_history, et vérifie la règle "
+    "applicable dans la grille via search_internal_docs. Puis appelle IMPÉRATIVEMENT "
+    "flag_decision_review avec ton verdict.\n"
+    "Échelle du niveau (sois calibré, ne sur-alerte pas) :\n"
+    "- 'ok' : la décision est justifiable au vu du dossier. De simples remarques mineures restent 'ok' "
+    "(avertissements vides ou 1 point mineur), coherent=true.\n"
+    "- 'attention' : réserve sérieuse mais pas rédhibitoire (ex. dossier limite, un indicateur tendu).\n"
+    "- 'alerte' : décision manifestement à risque, coherent=false. Typiquement : accord/analyse sur un "
+    "risque élevé ou critique (no_auto_processing), accord malgré des incidents non régularisés ou des "
+    "crédits en défaut, dépassement net de la grille ; ou à l'inverse un refus/escalade sur un dossier "
+    "manifestement sain. Donne alors des avertissements CONCRETS et sourcés (fichier.pdf, p.N)."
+)
+
+
+@app.post("/api/review-decision")
+async def review_decision(req: ReviewRequest):
+    """Garde-fou agentique : l'agent étudie le dossier en autonomie et rend un verdict (warnings) AVANT
+    que le conseiller ne finalise sa décision. Streamé en SSE (on voit l'agent travailler en direct)."""
+    if req.decision not in DECISIONS:
+        raise HTTPException(400, f"decision invalide (attendu : {DECISIONS})")
+    agent = state["agent"]
+    context = build_context(req.demande_id)
+    if not context:
+        raise HTTPException(404, "dossier introuvable")
+    user_msg = REVIEW_PROMPT.format(decision=req.decision, demande_id=req.demande_id)
+
+    async def gen():
+        trace: list[dict] = []
+        reply = ""
+        async with state["lock"]:
+            async for ev in agent.stream([{"role": "user", "content": user_msg}], context=context):
+                if ev["type"] == "tool_start":
+                    meta = TOOL_META.get(ev["tool"], {"icon": "🔧", "label": ev["tool"]})
+                    yield _sse({"type": "tool_start", "tool": ev["tool"],
+                                "icon": meta["icon"], "label": meta["label"], "input": ev.get("input")})
+                elif ev["type"] == "tool_end":
+                    yield _sse({"type": "tool_end", "tool": ev["tool"], "output": ev.get("output", "")})
+                elif ev["type"] == "thought":
+                    yield _sse({"type": "thought", "text": ev["text"]})
+                elif ev["type"] == "final":
+                    reply, trace = ev["reply"], ev["trace"]
+
+            verdict = review_from_trace(trace)
+            if verdict is None:  # filet de sécurité : l'agent n'a pas rendu son verdict -> on le force
+                yield _sse({"type": "tool_start", "tool": "flag_decision_review",
+                            "icon": "🛡️", "label": "Verdict de la revue", "input": None})
+                args = await agent.force_tool(
+                    [{"role": "user", "content":
+                      f"Voici ton analyse du dossier {req.demande_id} :\n{reply}\n\n"
+                      f"Rends maintenant le verdict de la revue de la décision « {req.decision} ». "
+                      "Niveau 'ok' si la décision est justifiable (des remarques mineures restent 'ok', "
+                      "coherent=true) ; 'attention' pour une réserve sérieuse ; 'alerte' (coherent=false) "
+                      "si la décision est manifestement à risque : accord/analyse sur risque élevé ou "
+                      "critique, incidents non régularisés, crédits en défaut, dépassement net de la "
+                      "grille, ou refus/escalade d'un dossier sain. Avertissements concrets si 'attention'/'alerte'."}],
+                    "flag_decision_review", context=context)
+                yield _sse({"type": "tool_end", "tool": "flag_decision_review", "output": ""})
+                if args:
+                    verdict = {k: args.get(k) for k in
+                               ("decision", "coherent", "niveau", "avertissements", "recommandation")}
+        yield _sse({"type": "done", "verdict": verdict})
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

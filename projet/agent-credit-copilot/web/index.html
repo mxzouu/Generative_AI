@@ -88,6 +88,25 @@
     </div>
   </div>
 
+  <!-- ============ REVUE DE DÉCISION (GARDE-FOU) ============ -->
+  <div id="review-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong id="review-title">🛡️ Revue de la décision par l'agent</strong>
+        <button id="review-close" class="chat-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="caption" id="review-intro">L'agent étudie le dossier de façon autonome avant validation…</p>
+        <div id="review-proc"></div>
+        <div id="review-verdict"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="review-cancel" class="btn btn-analyse">Annuler</button>
+        <button id="review-continue" class="btn btn-accord" disabled>Continuer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ CONTRE-OFFRE ============ -->
   <div id="offer-modal" class="modal" hidden>
     <div class="modal-card">

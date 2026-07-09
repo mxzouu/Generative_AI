@@ -162,7 +162,7 @@ function renderDetail(d) {
 
   if (!isTraite) {
     $("#detail").querySelectorAll("[data-dec]").forEach((b) => {
-      b.onclick = () => openEmail(b.dataset.dec, cl.client_id, dm.demande_id);
+      b.onclick = () => startDecision(b.dataset.dec, cl.client_id, dm.demande_id);
     });
   }
 }
@@ -197,6 +197,90 @@ async function openEmail(kind, client_id, demande_id, offer = null) {
     act.hidden = true;
     $("#email-body").value = ""; $("#email-status").textContent = "Erreur lors de la rédaction."; $("#email-status").className = "email-status err";
   }
+}
+
+// ====================================================== garde-fou : revue de décision (agentique)
+async function startDecision(kind, client_id, demande_id, offer = null) {
+  // L'agent étudie le dossier en autonomie AVANT que le conseiller ne finalise, et émet des warnings.
+  state.pendingDecision = { kind, client_id, demande_id, offer };
+  const proc = $("#review-proc"), verdict = $("#review-verdict"), cont = $("#review-continue"), intro = $("#review-intro");
+  proc.innerHTML = ""; verdict.innerHTML = ""; verdict.className = "";
+  cont.disabled = true; cont.textContent = "Continuer"; cont.className = "btn btn-accord";
+  intro.hidden = false; intro.textContent = "L'agent étudie le dossier de façon autonome avant validation…";
+  $("#review-modal").hidden = false;
+
+  let procBox = null, curInput = null;
+  if (state.showCoT) {
+    procBox = document.createElement("div"); procBox.className = "agent-proc";
+    procBox.innerHTML = `<div class="proc-label">⚙︎ Analyse autonome de l'agent</div>`;
+    proc.appendChild(procBox);
+  }
+  const status = document.createElement("div");
+  status.className = "typing"; status.textContent = "L'agent réfléchit…";
+  proc.appendChild(status);
+
+  try {
+    const resp = await fetch("/api/review-decision", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ demande_id, decision: kind }),
+    });
+    if (!resp.ok || !resp.body) throw new Error("review indisponible");
+    const reader = resp.body.getReader(), decd = new TextDecoder();
+    let buf = "", verd = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decd.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n\n")) >= 0) {
+        const rawl = buf.slice(0, nl); buf = buf.slice(nl + 2);
+        if (!rawl.startsWith("data:")) continue;
+        const ev = JSON.parse(rawl.slice(5).trim());
+        if (ev.type === "thought") {
+          if (procBox) procBox.appendChild(cotEl(ev.text));
+        } else if (ev.type === "tool_start") {
+          curInput = ev.input;
+          if (procBox) {
+            const { el } = toolStepEl({ icon: ev.icon, label: ev.label, input: ev.input });
+            el.classList.add("running"); procBox.appendChild(el);
+          }
+          status.textContent = state.showCoT ? `${ev.icon} ${ev.label}…` : "L'agent étudie le dossier…";
+        } else if (ev.type === "tool_end") {
+          if (procBox) {
+            const run = procBox.querySelector(".tool-step.running");
+            if (run) { run.classList.remove("running"); fillToolBody(run.querySelector(".ts-body"), { input: curInput, output: ev.output }); }
+          }
+        } else if (ev.type === "done") {
+          verd = ev.verdict;
+        }
+      }
+    }
+    status.remove(); intro.hidden = true;
+    renderVerdict(verd);
+    cont.disabled = false;
+  } catch (e) {
+    status.remove(); intro.hidden = true;
+    verdict.className = "verdict warn";
+    verdict.innerHTML = `<div class="v-head">⚠️ Revue indisponible</div><div class="v-reco">L'analyse automatique a échoué — vous pouvez poursuivre manuellement.</div>`;
+    cont.disabled = false;
+  }
+}
+
+function renderVerdict(v) {
+  const box = $("#review-verdict"), cont = $("#review-continue");
+  const niveau = v ? (v.niveau || (v.coherent ? "ok" : "attention")) : "ok";
+  const warns = v ? (v.avertissements || []).filter(Boolean) : [];
+  const HEAD = {
+    ok: ["ok", "✓ Décision cohérente selon l'agent"],
+    attention: ["warn", "⚠️ Points de vigilance"],
+    alerte: ["danger", "⛔ Décision à risque"],
+  }[niveau] || ["warn", "⚠️ Points de vigilance"];
+  box.className = "verdict " + HEAD[0];
+  box.innerHTML = `<div class="v-head">${HEAD[1]}</div>`
+    + (warns.length ? `<ul class="v-list">${warns.map((w) => `<li>${mdBold(w)}</li>`).join("")}</ul>` : "")
+    + (v && v.recommandation ? `<div class="v-reco">💡 ${mdBold(v.recommandation)}</div>` : "");
+  if (niveau === "ok") { cont.textContent = "Continuer"; cont.className = "btn btn-accord"; }
+  else { cont.textContent = "Passer outre et continuer"; cont.className = "btn btn-refus"; }
 }
 
 async function sendEmail() {
@@ -466,7 +550,7 @@ async function sendMessage(text) {
 
 async function handleAction(a) {
   if (a.type === "counter_offer" && a.offer) { openOfferModal(a.offer); return; }
-  if (a.type === "open_email" && a.kind) { openEmail(a.kind, a.client_id, a.demande_id); return; }
+  if (a.type === "open_email" && a.kind) { startDecision(a.kind, a.client_id, a.demande_id); return; }
   state.data = await api("/api/dossiers");
   if (a.type === "open_dossier" && a.demande_id) await openDossier(a.demande_id);
   else if (a.type === "refresh" && $("#list-view").hidden === false) renderList();
@@ -522,6 +606,12 @@ function init() {
   $("#chat-new").onclick = () => { newConv(); renderChat(); $("#chat-input").focus(); };
   $("#chat-form").onsubmit = (e) => { e.preventDefault(); const v = $("#chat-input").value; $("#chat-input").value = ""; sendMessage(v); };
   $("#email-close").onclick = $("#email-cancel").onclick = () => { $("#email-modal").hidden = true; };
+  $("#review-close").onclick = $("#review-cancel").onclick = () => { $("#review-modal").hidden = true; };
+  $("#review-continue").onclick = () => {
+    $("#review-modal").hidden = true;
+    const p = state.pendingDecision;
+    if (p) openEmail(p.kind, p.client_id, p.demande_id, p.offer);
+  };
   $("#email-send").onclick = sendEmail;
   $("#offer-close").onclick = $("#offer-drop").onclick = () => { $("#offer-modal").hidden = true; };
   $("#offer-validate").onclick = () => {

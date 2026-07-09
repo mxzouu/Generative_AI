@@ -367,6 +367,23 @@ textarea.motiv:focus { outline: 2px solid var(--blue); border-color: transparent
   border-top: 1px solid var(--hair); }
 .modal-actions .btn { padding: 11px 20px; }
 
+/* ---------- Verdict de la revue de décision (garde-fou) ---------- */
+#review-proc { margin: 6px 0 2px; max-height: 340px; overflow-y: auto; }
+.verdict { border-radius: 14px; padding: 14px 16px; margin-top: 12px; border: 1px solid var(--hair); }
+.verdict .v-head { font-weight: 700; font-size: 15px; }
+.verdict .v-list { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.verdict .v-list li { font-size: 14px; line-height: 1.45; }
+.verdict .v-reco { margin-top: 10px; font-size: 14px; }
+.verdict.ok { background: rgba(52,199,89,.12); border-color: rgba(52,199,89,.3); }
+.verdict.ok .v-head { color: #1a7f37; }
+.verdict.warn { background: rgba(255,159,10,.12); border-color: rgba(255,159,10,.35); }
+.verdict.warn .v-head { color: #b25e00; }
+.verdict.danger { background: rgba(255,59,48,.12); border-color: rgba(255,59,48,.35); }
+.verdict.danger .v-head { color: #c0362c; }
+@media (prefers-color-scheme: dark) {
+  .verdict.ok .v-head { color: #5be07a; } .verdict.warn .v-head { color: #ffc061; } .verdict.danger .v-head { color: #ff6b61; }
+}
+
 /* ---------- Lightbox ---------- */
 .lightbox { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.75);
   display: grid; place-items: center; padding: 30px; cursor: zoom-out;

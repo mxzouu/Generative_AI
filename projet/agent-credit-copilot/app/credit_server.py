@@ -235,6 +235,25 @@ def request_decision(demande_id: str, decision: str) -> dict:
             "client_id": row["client_id"], "decision": decision}
 
 
+@mcp_server.tool()
+def flag_decision_review(demande_id: str, decision: str, coherent: bool,
+                         niveau: str, avertissements: list[str],
+                         recommandation: str = "") -> dict:
+    """Émet le VERDICT d'une REVUE DE DÉCISION (garde-fou) — à appeler à la FIN de ton analyse.
+
+    N'écrit RIEN : sert uniquement à remonter à l'interface ce que tu as conclu après avoir étudié le
+    dossier toi-même (score, SHAP, historique, grille).
+    - coherent : True si la décision « decision » est justifiable au vu du dossier, False sinon.
+    - niveau ∈ {"ok", "attention", "alerte"} : gravité (alerte = décision manifestement à risque).
+    - avertissements : liste de points de vigilance CONCRETS et sourcés sur les données (vide si ok).
+    - recommandation : ce que tu conseilles à la place le cas échéant (ex. « escalade obligatoire »).
+    """
+    niveau = niveau if niveau in ("ok", "attention", "alerte") else ("ok" if coherent else "attention")
+    return {"revue_decision": True, "demande_id": demande_id, "decision": decision,
+            "coherent": bool(coherent), "niveau": niveau,
+            "avertissements": list(avertissements or []), "recommandation": recommandation}
+
+
 def _next_id(prefix: str, table: str, col: str, width: int) -> str:
     row = conn.execute(f"SELECT {col} FROM {table} WHERE {col} LIKE ? ORDER BY {col} DESC LIMIT 1",
                        (prefix + "%",)).fetchone()

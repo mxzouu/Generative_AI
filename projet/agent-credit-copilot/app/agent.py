@@ -97,6 +97,25 @@ class CreditAgent:
         yield {"type": "final",
                "reply": f"[stopped: max_iters={max_iters} atteint sans réponse finale]", "trace": trace}
 
+    async def force_tool(self, messages: list[dict], tool_name: str, context: str = ""):
+        """Force un appel d'outil précis (tool_choice) et renvoie ses ARGUMENTS.
+
+        Le tool n'est pas exécuté : ses arguments SONT le résultat structuré recherché (ex. un verdict).
+        Sert de filet de sécurité quand on exige une sortie structurée même si l'agent l'a oubliée.
+        """
+        system = SKILL if not context else f"{SKILL}\n\n## Dossier actuellement ouvert par le conseiller\n{context}"
+        tool = next((t for t in self.tools if t["name"] == tool_name), None)
+        resp = await asyncio.to_thread(
+            self.client.messages.create,
+            model=MODEL, max_tokens=MAX_TOKENS, system=system,
+            tools=[tool] if tool else self.tools,
+            tool_choice={"type": "tool", "name": tool_name}, messages=messages,
+        )
+        for b in resp.content:
+            if b.type == "tool_use" and b.name == tool_name:
+                return b.input
+        return None
+
     async def run(self, messages: list[dict], max_iters: int = 16, context: str = ""):
         """Wrapper non-streaming : draine stream() et renvoie (reply, trace).
 
