@@ -216,6 +216,25 @@ def record_decision(client_id: str, demande_id: str, decision: str,
             "statut": statut, "at": now}
 
 
+@mcp_server.tool()
+def request_decision(demande_id: str, decision: str) -> dict:
+    """Déclenche, dans l'interface, l'ouverture du COURRIER de décision du dossier ouvert.
+
+    À appeler quand le conseiller demande explicitement d'**accorder / refuser / mettre en analyse
+    manuelle / escalader** le dossier ouvert (decision ∈ {accord, refus, analyse_manuelle, escalade}).
+    N'écrit RIEN en base : l'interface ouvre le brouillon d'email correspondant, que le conseiller
+    relit puis envoie — et c'est cet envoi qui enregistre la décision. N'appelle donc PAS
+    record_decision toi-même : ce tool remplace le clic sur le bouton de décision.
+    """
+    if decision not in DECISIONS:
+        return {"error": f"decision doit être l'une de {DECISIONS}"}
+    row = conn.execute("SELECT client_id FROM demandes WHERE demande_id = ?", (demande_id,)).fetchone()
+    if row is None:
+        return {"error": f"dossier {demande_id} introuvable"}
+    return {"decision_a_valider": True, "demande_id": demande_id,
+            "client_id": row["client_id"], "decision": decision}
+
+
 def _next_id(prefix: str, table: str, col: str, width: int) -> str:
     row = conn.execute(f"SELECT {col} FROM {table} WHERE {col} LIKE ? ORDER BY {col} DESC LIMIT 1",
                        (prefix + "%",)).fetchone()

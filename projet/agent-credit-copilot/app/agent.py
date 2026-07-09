@@ -49,12 +49,19 @@ class CreditAgent:
             for t in listed.tools
         ]
 
-    async def run(self, messages: list[dict], max_iters: int = 16, context: str = ""):
-        """Boucle reason -> act -> observe ; renvoie (reply, trace).
+    async def stream(self, messages: list[dict], max_iters: int = 16, context: str = ""):
+        """Boucle reason -> act -> observe en générateur : yield des ÉVÉNEMENTS au fil de l'eau.
 
-        `trace` = un item par tool call {"tool", "input", "output"} — affiché dans l'UI.
-        `context` = infos sur le dossier ouvert à l'écran, injectées dans le system prompt
-        (l'agent sait alors DE QUEL dossier on parle sans qu'on retape son ID).
+        C'est la source de vérité de la boucle agent (run() n'en est qu'un wrapper). Elle permet
+        au backend de streamer, EN TEMPS RÉEL, ce que l'agent fait (comme un terminal d'agent).
+
+        Événements produits :
+          {"type": "thought", "text"}                     — texte de raisonnement intermédiaire
+          {"type": "tool_start", "tool", "input"}         — un tool va être appelé
+          {"type": "tool_end",   "tool", "output"}        — sa sortie vient d'arriver
+          {"type": "final", "reply", "trace"}             — réponse finale + trace complète
+
+        `context` = infos sur le dossier ouvert à l'écran, injectées dans le system prompt.
         `max_iters` est le garde-fou anti-boucle infinie.
         """
         system = SKILL if not context else f"{SKILL}\n\n## Dossier actuellement ouvert par le conseiller\n{context}"
@@ -68,20 +75,36 @@ class CreditAgent:
             )
             if resp.stop_reason != "tool_use":
                 text = "".join(b.text for b in resp.content if b.type == "text")
-                return text, trace
+                yield {"type": "final", "reply": text, "trace": trace}
+                return
             convo.append({"role": "assistant", "content": resp.content})
-            # Pensée intermédiaire de l'agent (texte produit AVANT d'appeler les outils) : on la
-            # remonte dans la trace pour donner à voir son raisonnement étape par étape dans l'UI.
+            # Pensée intermédiaire de l'agent (texte produit AVANT d'appeler les outils).
             thought = "".join(b.text for b in resp.content if b.type == "text").strip()
             if thought:
                 trace.append({"tool": "_thought", "text": thought})
+                yield {"type": "thought", "text": thought}
             results = []
             for block in resp.content:
                 if block.type != "tool_use":
                     continue
+                yield {"type": "tool_start", "tool": block.name, "input": block.input}
                 out = await self.session.call_tool(block.name, block.input)
                 output = "\n".join(c.text for c in out.content)
                 trace.append({"tool": block.name, "input": block.input, "output": output})
+                yield {"type": "tool_end", "tool": block.name, "output": output}
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
             convo.append({"role": "user", "content": results})
-        return f"[stopped: max_iters={max_iters} atteint sans réponse finale]", trace
+        yield {"type": "final",
+               "reply": f"[stopped: max_iters={max_iters} atteint sans réponse finale]", "trace": trace}
+
+    async def run(self, messages: list[dict], max_iters: int = 16, context: str = ""):
+        """Wrapper non-streaming : draine stream() et renvoie (reply, trace).
+
+        Conservé pour les appelants synchrones (bridge Streamlit, tests de fumée).
+        `trace` = un item par tool call {"tool", "input", "output"}.
+        """
+        reply, trace = "", []
+        async for ev in self.stream(messages, max_iters=max_iters, context=context):
+            if ev["type"] == "final":
+                reply, trace = ev["reply"], ev["trace"]
+        return reply, trace

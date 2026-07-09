@@ -107,12 +107,17 @@ function renderDetail(d) {
        <tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
     : `<p class="caption">Aucun élément.</p>`;
 
-  const decisionBlock = d.decision
+  // Un dossier « traité » (accord/refus) est clos ; « à traiter » et « en cours » restent actionnables.
+  const isTraite = dm.statut === "traité";
+  const lastActionHtml = d.decision
     ? `<div class="done">Dernière action : ${esc(d.decision.label)} — ${esc(d.decision.date_decision.slice(0, 10))}
         ${d.decision.commentaire ? `<div class="caption">📝 ${esc(d.decision.commentaire)}</div>` : ""}
-        ${d.decision.decision === "refus" ? `<div class="caption">💬 Ouvrez l'assistant pour rouvrir ce dossier.</div>` : ""}</div>`
-    : `<p class="caption" style="margin-bottom:10px">Un email sera rédigé par l'assistant pour validation avant envoi.</p>
-       <div class="actions">${ACT.map(([c, l, k]) => `<button class="btn ${k}" data-dec="${c}">${l}</button>`).join("")}</div>`;
+        ${isTraite && d.decision.decision === "refus" ? `<div class="caption">💬 Ouvrez l'assistant pour rouvrir ce dossier.</div>` : ""}</div>`
+    : "";
+  const actionsHtml =
+    `<p class="caption" style="margin:12px 0 10px">${d.decision ? "Vous pouvez faire évoluer ce dossier. " : ""}Un email sera rédigé par l'assistant pour validation avant envoi.</p>
+     <div class="actions">${ACT.map(([c, l, k]) => `<button class="btn ${k}" data-dec="${c}">${l}</button>`).join("")}</div>`;
+  const decisionBlock = isTraite ? lastActionHtml : lastActionHtml + actionsHtml;
 
   $("#detail").innerHTML = `
     <div class="detail-head">
@@ -154,7 +159,7 @@ function renderDetail(d) {
     </details>
     <div class="panel"><h3>Décision du conseiller</h3>${decisionBlock}</div>`;
 
-  if (!d.decision) {
+  if (!isTraite) {
     $("#detail").querySelectorAll("[data-dec]").forEach((b) => {
       b.onclick = () => openEmail(b.dataset.dec, cl.client_id, dm.demande_id);
     });
@@ -250,6 +255,15 @@ function chipsFor() {
 }
 
 function bubble(m, log) {
+  // Chaîne d'outils réellement appelés par l'agent : rendue au-dessus de sa réponse
+  // pour donner à voir qu'il travaille agentiquement (skills/tools MCP).
+  if (m.role !== "user" && m.tools && m.tools.length) {
+    const tu = document.createElement("div");
+    tu.className = "tools-used";
+    tu.innerHTML = `<span class="tu-label">⚙︎ Actions de l'agent</span>` +
+      m.tools.map((t) => `<span class="tu-chip">${t.icon} ${esc(t.label)}${t.count > 1 ? ` ×${t.count}` : ""}</span>`).join("");
+    log.appendChild(tu);
+  }
   const b = document.createElement("div");
   b.className = "bubble " + (m.role === "user" ? "user" : "bot");
   b.innerHTML = m.role === "user" ? esc(m.content) : mdBold(m.content);
@@ -331,19 +345,60 @@ async function sendMessage(text) {
   if (conv.title === "Nouvelle conversation") conv.title = text.trim().slice(0, 42);
   renderChat();
   state.busy = true;
-  const typing = document.createElement("div");
-  typing.className = "typing"; typing.textContent = "L'assistant réfléchit…";
-  $("#chat-log").appendChild(typing); $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+  const log = $("#chat-log");
+
+  // Bloc d'activité EN TEMPS RÉEL : les outils s'affichent au fil de l'eau (façon terminal d'agent).
+  const live = document.createElement("div");
+  live.className = "tools-used tools-live"; live.hidden = true;
+  live.innerHTML = `<span class="tu-label">⚙︎ Actions de l'agent</span>`;
+  const thinking = document.createElement("div");
+  thinking.className = "typing"; thinking.textContent = "L'assistant réfléchit…";
+  log.appendChild(live); log.appendChild(thinking);
+  log.scrollTop = log.scrollHeight;
+  const finish = () => { thinking.remove(); live.remove(); };
+  let running = null;  // pastille du tool en cours d'exécution
+
   try {
-    const history = conv.msgs.map((m) => ({ role: m.role, content: m.content }));
-    const res = await api("/api/chat", {
+    const resp = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: history, demande_id: state.currentId }),
+      body: JSON.stringify({ messages: conv.msgs.map((m) => ({ role: m.role, content: m.content })), demande_id: state.currentId }),
     });
-    conv.msgs.push({ role: "assistant", content: res.reply, sources: res.sources || [] });
+    if (!resp.ok || !resp.body) throw new Error("stream indisponible");
+    const reader = resp.body.getReader(), decoder = new TextDecoder();
+    let buf = "", final = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n\n")) >= 0) {
+        const raw = buf.slice(0, nl); buf = buf.slice(nl + 2);
+        if (!raw.startsWith("data:")) continue;
+        const ev = JSON.parse(raw.slice(5).trim());
+        if (ev.type === "tool_start") {
+          live.hidden = false;
+          if (running) running.classList.remove("running");
+          running = document.createElement("span");
+          running.className = "tu-chip running";
+          running.innerHTML = `${ev.icon} ${esc(ev.label)}`;
+          live.appendChild(running);
+          thinking.textContent = `${ev.icon} ${ev.label}…`;
+          log.scrollTop = log.scrollHeight;
+        } else if (ev.type === "tool_end") {
+          if (running) running.classList.remove("running");
+          thinking.textContent = "L'assistant rédige sa réponse…";
+        } else if (ev.type === "done") {
+          final = ev;
+        }
+      }
+    }
+    finish();
+    conv.msgs.push({ role: "assistant", content: (final && final.reply) || "",
+                     sources: (final && final.sources) || [], tools: (final && final.tools) || [] });
     state.busy = false; renderChat();
-    if (res.action) await handleAction(res.action);
+    if (final && final.action) await handleAction(final.action);
   } catch (e) {
+    finish();
     conv.msgs.push({ role: "assistant", content: "⚠️ Erreur : impossible de joindre l'assistant." });
     state.busy = false; renderChat();
   }
@@ -351,6 +406,7 @@ async function sendMessage(text) {
 
 async function handleAction(a) {
   if (a.type === "counter_offer" && a.offer) { openOfferModal(a.offer); return; }
+  if (a.type === "open_email" && a.kind) { openEmail(a.kind, a.client_id, a.demande_id); return; }
   state.data = await api("/api/dossiers");
   if (a.type === "open_dossier" && a.demande_id) await openDossier(a.demande_id);
   else if (a.type === "refresh" && $("#list-view").hidden === false) renderList();

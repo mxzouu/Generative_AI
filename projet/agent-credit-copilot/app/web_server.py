@@ -20,7 +20,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
@@ -48,6 +48,23 @@ DECISION_LABELS = {"accord": "Accepté", "refus": "Refusé",
                    "analyse_manuelle": "Analyse manuelle", "escalade": "Escaladé",
                    "contre_offre": "Contre-offre envoyée"}
 CONTRAT = {0: "CDI", 1: "Indépendant", 2: "CDD", 3: "Sans emploi"}
+
+# Libellés lisibles des tools MCP (pour montrer, dans l'UI, ce que l'agent a réellement fait).
+TOOL_META = {
+    "get_client_profile":   {"icon": "👤", "label": "Profil client"},
+    "run_credit_score":     {"icon": "📊", "label": "Calcul du score"},
+    "explain_score":        {"icon": "🧮", "label": "Explication du score (SHAP)"},
+    "search_internal_docs": {"icon": "📚", "label": "Recherche documentaire (RAG)"},
+    "simulate_offer":       {"icon": "🎚️", "label": "Simulation what-if"},
+    "propose_counter_offer":{"icon": "💡", "label": "Contre-offre"},
+    "query_client_history": {"icon": "📁", "label": "Historique du client"},
+    "record_decision":      {"icon": "✍️", "label": "Décision enregistrée"},
+    "request_decision":      {"icon": "📨", "label": "Préparation du courrier de décision"},
+    "add_client":           {"icon": "➕", "label": "Nouveau client"},
+    "add_dossier":          {"icon": "📂", "label": "Nouveau dossier"},
+    "reopen_dossier":       {"icon": "🔄", "label": "Réouverture du dossier"},
+    "list_dossiers":        {"icon": "🗂️", "label": "Liste des dossiers"},
+}
 
 model = CreditModel.load(MODEL_PATH)
 _score_cache: dict[str, dict] = {}
@@ -123,6 +140,28 @@ def sources_from_trace(trace: list[dict]) -> list[dict]:
     return sources
 
 
+def tools_from_trace(trace: list[dict]) -> list[dict]:
+    """Suite ordonnée des tools MCP réellement appelés par l'agent (hors items de raisonnement).
+
+    Dédupliqué en gardant l'ordre du 1er appel + un compteur : l'UI affiche ainsi, sous chaque
+    réponse, la chaîne d'actions de l'agent (preuve qu'il travaille bien agentiquement).
+    """
+    order: list[str] = []
+    counts: dict[str, int] = {}
+    for t in trace:
+        name = t.get("tool")
+        if not name or name == "_thought":
+            continue
+        if name not in counts:
+            order.append(name)
+        counts[name] = counts.get(name, 0) + 1
+    out = []
+    for name in order:
+        meta = TOOL_META.get(name, {"icon": "🔧", "label": name})
+        out.append({"tool": name, "icon": meta["icon"], "label": meta["label"], "count": counts[name]})
+    return out
+
+
 def action_from_trace(trace: list[dict]) -> dict | None:
     """Détecte une action déclenchée par l'agent qui doit piloter l'UI (ouvrir/rafraîchir/contre-offre)."""
     action = None
@@ -134,6 +173,9 @@ def action_from_trace(trace: list[dict]) -> dict | None:
                 continue
             if t["tool"] == "propose_counter_offer" and v.get("proposition_contre_offre"):
                 action = {"type": "counter_offer", "offer": v}
+            elif t["tool"] == "request_decision" and v.get("decision_a_valider"):
+                action = {"type": "open_email", "kind": v["decision"],
+                          "demande_id": v["demande_id"], "client_id": v["client_id"]}
             elif t["tool"] in ("add_dossier", "reopen_dossier") and v.get("demande_id"):
                 action = {"type": "open_dossier", "demande_id": v["demande_id"]}
             elif t["tool"] == "add_client" and v.get("client_id"):
@@ -282,14 +324,38 @@ def dossier(demande_id: str):
     }
 
 
+def _sse(event: dict) -> str:
+    """Encode un événement en Server-Sent Event (une ligne data: JSON)."""
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    """Streaming SSE : on relaie EN TEMPS RÉEL chaque outil appelé par l'agent, puis l'événement
+    final (réponse + sources + trace des outils + action UI). Le front affiche les outils au fil de l'eau.
+    """
     agent = state["agent"]
     context = build_context(req.demande_id)
-    async with state["lock"]:
-        reply, trace = await agent.run(req.messages, context=context)
-    _score_cache.clear()  # l'agent a pu créer/rouvrir un dossier -> on invalide le cache de scores
-    return {"reply": reply, "sources": sources_from_trace(trace), "action": action_from_trace(trace)}
+
+    async def gen():
+        trace: list[dict] = []
+        reply = ""
+        async with state["lock"]:
+            async for ev in agent.stream(req.messages, context=context):
+                if ev["type"] == "tool_start":
+                    meta = TOOL_META.get(ev["tool"], {"icon": "🔧", "label": ev["tool"]})
+                    yield _sse({"type": "tool_start", "tool": ev["tool"],
+                                "icon": meta["icon"], "label": meta["label"]})
+                elif ev["type"] == "tool_end":
+                    yield _sse({"type": "tool_end", "tool": ev["tool"]})
+                elif ev["type"] == "final":
+                    reply, trace = ev["reply"], ev["trace"]
+        _score_cache.clear()  # l'agent a pu créer/rouvrir un dossier -> on invalide le cache de scores
+        yield _sse({"type": "done", "reply": reply, "sources": sources_from_trace(trace),
+                    "tools": tools_from_trace(trace), "action": action_from_trace(trace)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/decision")
